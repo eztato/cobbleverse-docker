@@ -1,0 +1,127 @@
+services:
+  cobbleverse-docker:
+    image: itzg/minecraft-server:java21
+    container_name: cobbleverse-docker
+    restart: unless-stopped
+    stop_grace_period: 1m30s
+
+    ports:
+      - "25565:25565"
+      - "10101:10101"
+
+    environment:
+      EULA: "TRUE"
+      TYPE: "MODRINTH"
+      VERSION: "1.21.1"
+      MODRINTH_MODPACK: "cobbleverse"
+      MODRINTH_LOADER: "fabric"
+      MODRINTH_MODPACK_VERSION_TYPE: "release"
+
+      INIT_MEMORY: "6G"
+      MAX_MEMORY: "12G"
+      TZ: "${SERVER_TZ:-America/Lima}"
+
+      USE_MEOWICE_FLAGS: "true"
+
+      VIEW_DISTANCE: "8"
+      SIMULATION_DISTANCE: "6"
+      SYNC_CHUNK_WRITES: "false"
+      NETWORK_COMPRESSION_THRESHOLD: "256"
+      ENABLE_COMMAND_BLOCK: "true"
+
+      MODRINTH_PROJECTS_DEFAULT_VERSION_TYPE: "release"
+
+      MODRINTH_PROJECTS: |
+        fabric:luckperms
+        fabric:chunky
+        fabric:collective
+        fabric:oritech
+        fabric:refined-storage
+        fabric:refined-storage-rei-integration
+        fabric:bloos-gacha-machine
+        fabric:cobblemonraiddens
+        fabric:cobbledgacha
+        fabric:fallingtree
+        fabric:legendary-monuments
+        fabric:terrablender:beta
+        fabric:chipped
+        fabric:cobblemon-alpha-project
+        fabric:cobblemon-cobblestats
+        fabric:c2me-fabric:alpha
+
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "${RCON_PASSWORD:?Set RCON_PASSWORD in .env}"
+
+      # Pregeneracion automatica al iniciar (pasos 2, 3 y 4)
+      RCON_CMDS_STARTUP: |-
+        chunky start minecraft:overworld circle 0 0 5000
+        chunky start minecraft:the_nether circle 0 0 2500
+        chunky start minecraft:the_end circle 0 0 2000
+        chunky quiet 15
+        chunky progress
+
+      # Pausar pregeneracion al entrar jugadores y reanudar cuando se vacia
+      RCON_CMDS_FIRST_CONNECT: |-
+        chunky pause
+
+      RCON_CMDS_LAST_DISCONNECT: |-
+        chunky continue
+
+    volumes:
+      - ./data:/data
+      - ./config:/config:ro
+
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/25565'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 2m
+
+  mc-backup:
+    image: "${MC_BACKUP_IMAGE:-itzg/mc-backup:2026.2.0}"
+    container_name: cobbleverse-docker-backup
+    restart: unless-stopped
+    depends_on:
+      - cobbleverse-docker
+    environment:
+      RCON_HOST: "cobbleverse-docker"
+      RCON_PORT: "25575"
+      RCON_PASSWORD: "${RCON_PASSWORD:?Set RCON_PASSWORD in .env}"
+      INITIAL_DELAY: "2m"
+      BACKUP_INTERVAL: "24h"
+      PRUNE_BACKUPS_DAYS: "7"
+      PAUSE_IF_NO_PLAYERS: "true"
+    volumes:
+      - ./data:/data:ro
+      - ./backups:/backups
+
+  update-checker:
+    image: python:3.12-alpine
+    container_name: cobbleverse-docker-update-checker
+    restart: unless-stopped
+    depends_on:
+      - cobbleverse-docker
+    working_dir: /workspace
+    command: ["python", "/scripts/update-checker.py", "loop"]
+    environment:
+      UPDATE_CHECK_ENABLED: "${UPDATE_CHECK_ENABLED:-true}"
+      UPDATE_CHECK_ON_START: "${UPDATE_CHECK_ON_START:-true}"
+      UPDATE_CHECK_INTERVAL_HOURS: "${UPDATE_CHECK_INTERVAL_HOURS:-168}"
+      UPDATE_NOTIFY_LOG: "${UPDATE_NOTIFY_LOG:-true}"
+      UPDATE_NOTIFY_DISCORD: "${UPDATE_NOTIFY_DISCORD:-false}"
+      UPDATE_NOTIFY_DISCORD_WEBHOOK: "${UPDATE_NOTIFY_DISCORD_WEBHOOK:-}"
+      UPDATE_NOTIFY_MINECRAFT: "${UPDATE_NOTIFY_MINECRAFT:-false}"
+      UPDATE_NOTIFY_MINECRAFT_REPEAT_HOURS: "${UPDATE_NOTIFY_MINECRAFT_REPEAT_HOURS:-24}"
+      LOCAL_MANIFEST_PATH: "/data/.modrinth-modpack-manifest.json"
+      UPDATE_CHECK_STATE_FILE: "/state/state.json"
+      MODRINTH_PROJECT_SLUG: "${MODRINTH_PROJECT_SLUG:-cobbleverse}"
+      MODRINTH_LOADER: "${MODRINTH_LOADER:-fabric}"
+      MODRINTH_GAME_VERSION: "${MODRINTH_GAME_VERSION:-1.21.1}"
+      RCON_HOST: "cobbleverse-docker"
+      RCON_PORT: "25575"
+      RCON_PASSWORD: "${RCON_PASSWORD:-}"
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./data:/data:ro
+      - ./backups/update-check:/state
